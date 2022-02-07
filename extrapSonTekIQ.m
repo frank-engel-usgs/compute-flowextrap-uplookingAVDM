@@ -4,21 +4,22 @@
 % TODO: output time and depth for averaging interval; document
 
 % Inputs
-sontekMatFile = './example/01467087_20210322_175842.mat';
-sontekVelFile = './example/01467087_20210322_175842.VEL';
-% sontekMatFile = '01467087_20210324_000110 (1).mat';
-% sontekVelFile = '01467087_20210324_000110.VEL';
+% sontekMatFile = './example/01467087_20210322_175842.mat';
+% sontekVelFile = './example/01467087_20210322_175842.VEL';
+sontekMatFile = './example/01467087_20210324_000110.mat';
+sontekVelFile = './example/01467087_20210324_000110.VEL';
 columnSkip = 6;
 columnCellCenter = 14;
 usedFlowMean = false;
 minDepthForFit = 0;
+averageInterval = 5;  % For averaging profiles
 fitType = 'PowerPower';
 
 
 %%% --- DO NOT EDIT BELOW THIS LINE ---
 
 clc; close all;
-clearvars -except sontekVelFile sontekMatFile columnSkip columnCellCenter usedFlowMean minDepthForFit fitType
+clearvars -except sontekVelFile sontekMatFile columnSkip columnCellCenter usedFlowMean minDepthForFit fitType averageInterval
 
 %% Load input SonTek File and Parse to variables
 [time, flowDepth, zdim, udim, u, w] = parseSonTekIQ(sontekVelFile, sontekMatFile, columnCellCenter, columnSkip, usedFlowMean);
@@ -27,22 +28,54 @@ clearvars -except sontekVelFile sontekMatFile columnSkip columnCellCenter usedFl
 %% Process the flow data
 % Explanation
 disp('Computing extrap for each data point...')
-% [exponent, alpha] = computeExtrap(flowDepth, udim, zdim, minDepthForFit, fitType, 1, false);
+[exponent, alpha, time_extrap] = computeExtrap(time, flowDepth, udim, zdim, minDepthForFit, fitType, 1, false);
 
 % Average every averageInterval samples, include a plot
-averageInterval = 15;
 disp(['Computing extrap at data point interval of every ' averageInterval  ' elements...'])
-[exponent_avg, alpha_avg] = computeExtrap(flowDepth, udim, zdim, minDepthForFit, fitType, averageInterval, true);
+[exponent_avg, alpha_avg, time_extrap_avg] = computeExtrap(time, flowDepth, udim, zdim, minDepthForFit, fitType, averageInterval, false);
 
+%% Create a plot of the data
+fh = figure(1);
+fh.Position = [1000 700 1000 600];
+set(fh,'Name', 'Processed ADVM Data');
+gcf; clf;
+h1 = plot(time_extrap, exponent, 'Color', 'blue', 'LineStyle', '-', LineWidth=1.5); hold on
+h2 = plot(time_extrap_avg, exponent_avg, 'bs', 'markerSize', 8, 'MarkerFaceColor','white');
+h3 = plot(time_extrap, alpha, 'Color', 'green', 'LineStyle', '-', LineWidth=1.5); hold on
+h4 = plot(time_extrap_avg, alpha_avg, 'gs', 'markerSize', 8, 'MarkerFaceColor','white');
+datetick x
+legend('Exponent', 'Avg Exponent', 'Alpha', 'Avg Alhpa')
+title('Results of fitting ADVM data with extrap')
+xlabel('Time')
+ylabel('Value')
+
+%% Create CSV files of the results
+[fpath, name, ext]  = fileparts(sontekMatFile);
+unitCSVFilename = fullfile(fpath, [name '.csv']);
+avgCSVFilename = fullfile(fpath, [name '_avg.csv']);
+unitHeaders = {'SampleTimeMat', 'SampleTime','Exponent','Alpha'};
+avgHeaders = {'SampleTimeMat', 'SampleTime','AvgExponent','AvgAlpha'};
+
+tab = table(time, datestr(time), exponent', alpha');
+Tc = [unitHeaders; table2cell(tab)];
+unitTable = cell2table(Tc, 'VariableNames', tab.Properties.VariableNames);
+
+tab = table(time_extrap_avg', datestr(time_extrap_avg'), exponent_avg', alpha_avg');
+Tc = [avgHeaders; table2cell(tab)];
+avgTable = cell2table(Tc, 'VariableNames', tab.Properties.VariableNames);
+
+writetable(unitTable, unitCSVFilename);
+writetable(avgTable, avgCSVFilename);
 
 
 %% Helper Functions
-function [exponent, alpha] = computeExtrap(flowDepth, udim, zdim, minDepthForFit, fitType, averageInterval, makePlot)
+function [exponent, alpha, time_extrap] = computeExtrap(time, flowDepth, udim, zdim, minDepthForFit, fitType, averageInterval, makePlot)
 reverseStr = '';
 if (averageInterval == 1)
     for i = 1:numel(flowDepth)
         if flowDepth(i)>=minDepthForFit
             [exponent(i), alpha(i)] = extrapADVM(udim, zdim, i, fitType, makePlot);
+            time_extrap(i) = time(i); 
         else
             exponent(i) = nan;
             alpha(i) = nan;
@@ -59,6 +92,7 @@ else
     for i = 1:averageInterval:numel(flowDepth)-averageInterval-1
         if nanmin(flowDepth(i:i+averageInterval-1))>=minDepthForFit
             [exponent(j),alpha(j)] = extrapADVM(udim,zdim,i:i+averageInterval-1, fitType, makePlot);
+            time_extrap(j) = nanmean(time(i:i+averageInterval-1));
         else
             exponent(j)=nan;
             alpha(j)=nan;
